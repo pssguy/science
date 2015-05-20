@@ -1,0 +1,217 @@
+---
+title: "myTinyShinys"
+author: "pssguy"
+date: "Tuesday, 19th May 2015"
+output:
+  html_document:
+    fig_caption: yes
+resource_files:
+- ne_50m_admin_0_countries.dbf
+- ne_50m_admin_0_countries.shp
+- ne_50m_admin_0_countries.shx
+- ne_50m_admin_0_countries.prj
+runtime: shiny
+css: custom.css
+---
+###  <span class="post">Climate Change Views</span>
+*19th May 2015*
+
+I am currently dipping into a MOOC on [Climate Denial](https://www.edx.org/course/making-sense-climate-science-denial-uqx-denial101x). 
+   My small contribution is to map some rather outdated (2007/8) Gallup poll data from a survey of individuals from 128 countries in the first comprehensive study of global opinions.The information is available in a [Wikipedia Article](http://en.wikipedia.org/wiki/Climate_change_opinion_by_country)
+
+
+Enter the category you are interested in and the number of groupings (2-9) you wish to separate the countries into. Click on any country for all the data
+```{r, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+# load required libraries
+
+library(XML)
+library(httr)
+library(stringr)
+library(leaflet)
+library(rgdal)
+library(dplyr)
+library(ggvis)
+
+## could download and save to file which is read in but
+## this shows method and is pretty brief anyways 
+
+## data is in html table so this is easiest method to extract
+theUrl <- "http://en.wikipedia.org/wiki/Climate_change_opinion_by_country"
+
+tables = readHTMLTable(theUrl,colClasses=c("character","integer","integer","integer"),stringsAsFactors=F)
+
+# tables are unnamed but it is second on page
+data <- tables[[2]]
+
+#rename columns
+colnames(data) <- c("Country","Awareness","Caused_by_Humans","Perceived_Threat")
+
+
+# read in country shape files previously downloaded from Natural Earth
+#http://www.naturalearthdata.com/downloads/50m-cultural-vectors/50m-admin-0-countries-2/
+
+countries <- readOGR(dsn=".",
+                     layer = "ne_50m_admin_0_countries", 
+                     encoding = "UTF-8",verbose=FALSE)
+
+## check for differences in country names and correct
+sort(setdiff(data$Country,countries$name))
+
+data[data$Country=="Central African Republic",]$Country <- "Central African Rep."
+data[data$Country=="Czech Republic",]$Country <- "Czech Rep."
+data[data$Country=="Democratic Republic of the Congo",]$Country <- "Dem. Rep. Congo"
+data[data$Country=="Dominican Republic",]$Country <- "Dominican Rep."
+data[data$Country=="Laos",]$Country <- "Lao PDR"
+data[data$Country=="Republic of the Congo",]$Country <- "Congo"
+data[data$Country=="South Korea",]$Country <- "Korea"
+
+# merge the data with the shapefiles
+countries2 <- sp::merge(countries, 
+                        data, 
+                        by.x = "name", 
+                        by.y = "Country",                    
+                        sort = FALSE) 
+
+# create popup
+
+popUp <- paste0("<strong>", countries2$name, "</strong><br>",
+                 
+                "<br><strong>Awareness: </strong>", countries2$Awareness, 
+                "%<br><strong>Caused by Humans: </strong>", countries2$Caused_by_Humans,
+                "%<br><strong>Perceived Threat: </strong>", countries2$Perceived_Threat,"%")
+
+
+# creative inputs for groupings and categories 
+numericInput("bins","Number of Groups",value=4,min=2,max=9,step=1)
+
+radioButtons(inputId="category",label="Category",choices=c("Awareness","Caused_by_Humans","Perceived_Threat"),selected="Awareness",inline=TRUE)
+
+
+
+
+# create map
+output$map <- renderLeaflet({
+ 
+  if (is.null(input$category)) return()
+ 
+  # split into equal sized bins for all 128 counties
+  theBins <- input$bins
+buckets <- seq(from=1, to=128,by=128/theBins)
+
+
+# Create labels for legend
+for (i in 1:(length(buckets)-1)) {
+  if (i!=1) {
+    labs <- c(labs,paste0(floor(buckets[i]),"-",floor(buckets[i+1]-1)))
+  } else {
+    labs<- paste0(floor(buckets[i]),"-",floor(buckets[i+1]-1))
+  }
+  
+}
+labs <- c(labs,paste0(floor(buckets[i+1]),"-128"),"NA")
+
+# use a qualitative color range
+pal <- colorQuantile("RdYlGn", domain=NULL, n = theBins,na.color="#808080")
+
+# need to find way to 
+  if(input$category=="Awareness") {
+  theMap <-countries2 %>% 
+  leaflet() %>% 
+  setView(lng=0,lat=0,zoom= 1) %>% 
+  addTiles()  %>% # defaults to openstreetmap version
+  addPolygons(fillColor = ~pal(Awareness), weight=1,color = "#BDBDC3"
+              ,fillOpacity=0.9 ,
+             popup = popUp) %>% 
+
+  addLegend(colors = c(rev(RColorBrewer::brewer.pal(theBins, "RdYlGn")), "#808080"),  
+            bins = theBins, 
+            position = 'bottomleft', 
+            title = "Ranking Band", 
+            labels = labs) %>% 
+  mapOptions(zoomToLimits="first") 
+} else if(input$category=="Caused_by_Humans") {
+ theMap <-countries2 %>% 
+  leaflet() %>% 
+  setView(lng=0,lat=0,zoom= 1) %>% 
+  addTiles()  %>% 
+  addPolygons(fillColor = ~pal(Caused_by_Humans), weight=1,color = "#BDBDC3"
+              ,fillOpacity=0.9 ,
+             popup = popUp) %>% 
+
+  addLegend(colors = c(rev(RColorBrewer::brewer.pal(theBins, "RdYlGn")), "#808080"),  
+            bins = theBins, 
+            position = 'bottomleft', 
+            title = "Ranking Band", 
+            labels = labs) %>% 
+  mapOptions(zoomToLimits="first") 
+   } else {
+      theMap <-countries2 %>% 
+  leaflet() %>% 
+  setView(lng=0,lat=0,zoom= 1) %>% 
+  addTiles()  %>% 
+  addPolygons(fillColor = ~pal(Perceived_Threat), weight=1,color = "#BDBDC3"
+              ,fillOpacity=0.9 ,
+             popup = popUp) %>% 
+
+  addLegend(colors = c(rev(RColorBrewer::brewer.pal(theBins, "RdYlGn")), "#808080"),  
+            bins = theBins, 
+            position = 'bottomleft', 
+            title = "Ranking Band", 
+            labels = labs) %>% 
+  mapOptions(zoomToLimits="first") 
+  }
+
+
+
+theMap
+})
+
+leafletOutput("map")
+```
+
+
+
+Some interesting variation here. Europe and North America were among the most aware but South American countries seemed more keen to pin the blame on human actions, a view to which 97% of climate scientists apparently concur
+
+---
+
+
+Here are some charts comparing the variables. Hover over point for Country
+
+```{r, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+
+data <- cbind(data, id = seq_len(nrow(data)))
+
+ 
+ all_values<- function(x) {
+   if(is.null(x)) return(NULL)
+   row <- data[data$id == x$id,c("Country")]
+   paste0( format(row), collapse = "<br />")
+ }
+
+
+ 
+data %>% 
+  ggvis(~Awareness,~Caused_by_Humans,key := ~id) %>%
+   layer_points() %>%
+   add_tooltip(all_values, "hover") %>% 
+   add_axis("y", title="Caused by Humans")
+
+
+data %>% 
+  ggvis(~Awareness,~Perceived_Threat,key := ~id) %>%
+   layer_points() %>%
+   add_tooltip(all_values, "hover")  %>% 
+   add_axis("y", title="Perceived Threat")
+
+data %>% 
+  ggvis(~Perceived_Threat,~Caused_by_Humans,key := ~id) %>%
+   layer_points() %>%
+   add_tooltip(all_values, "hover") %>% 
+   add_axis("y", title="Caused by Humans")%>% 
+   add_axis("x", title="Perceived Threat")
+
+
+```
+
